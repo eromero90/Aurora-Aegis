@@ -1,0 +1,3 @@
+# Bridge Linux Unshared Network Namespaces to the Host Egress Firewall via Unix Domain Socket
+
+On Linux, `bubblewrap --unshare-net` creates an isolated network namespace with only a disconnected loopback interface (`127.0.0.1`), which prevents the jailed process from reaching the host's loopback **Egress Firewall** over TCP. Rather than leaving host networking shared on Linux (which would permit raw socket exfiltration), we keep `--unshare-net` strictly enabled, bind-mount a per-session host Unix Domain Socket (`egress.sock`) into the sandbox, and run an in-namespace loopback-to-UDS forwarder so tools inside the Linux sandbox connect to `127.0.0.1:<port>` while having zero external network interfaces.

@@ -1,0 +1,3 @@
+# Use Asymmetric Sandboxing for Desktop IDEs and MCP Hosts
+
+Wrapping an entire Electron or native GUI IDE (Cursor, Antigravity, Claude Desktop) inside `sandbox-exec` or `bubblewrap` breaks macOS WindowServer/Metal Mach IPC and creates the **Keychain Paradox**: granting the parent GUI access to OS Keychains and session cookies automatically passes that same privilege to every child shell spawned by the agent. We use **Asymmetric Sandboxing**, leaving the GUI host unrestricted in the **Control Plane** while interposing at the process-spawn boundary via an agent **Shell Shim** (`aegis-zsh`) and MCP command wrappers (`aegis mcp-wrap`).
