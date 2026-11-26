@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import type {
   CommandResult,
   DriverExecOptions,
@@ -12,20 +14,60 @@ import { canonicalizePath, isSubpathOf } from '../utils/paths.js';
 import { killProcessTree } from '../utils/process-tree.js';
 import { compileBwrapArgs } from './bwrap-compiler.js';
 
+const UDS_BRIDGE_BOOTSTRAP_SOURCE = [
+  'const net = require("node:net");',
+  'const { spawn } = require("node:child_process");',
+  'const port = Number(process.argv[2]);',
+  'const sock = process.argv[3];',
+  'const cmd = process.argv[4];',
+  'const srv = net.createServer((tcp) => {',
+  '  const uds = net.connect({ path: sock });',
+  '  const closeBoth = () => { if (!tcp.destroyed) tcp.destroy(); if (!uds.destroyed) uds.destroy(); };',
+  '  tcp.on("error", closeBoth);',
+  '  uds.on("error", closeBoth);',
+  '  tcp.on("close", closeBoth);',
+  '  uds.on("close", closeBoth);',
+  '  tcp.pipe(uds);',
+  '  uds.pipe(tcp);',
+  '});',
+  'srv.on("error", (err) => {',
+  '  process.stderr.write("aegis-uds-bridge error: " + err.message + "\\n");',
+  '  process.exit(1);',
+  '});',
+  'srv.listen(port, "127.0.0.1", () => {',
+  '  const child = spawn("/bin/sh", ["-c", cmd], { stdio: "inherit", env: process.env });',
+  '  child.on("exit", (code, signal) => {',
+  '    srv.close();',
+  '    process.exit(code ?? (signal ? 1 : 0));',
+  '  });',
+  '  child.on("error", (err) => {',
+  '    srv.close();',
+  '    process.stderr.write(err.message + "\\n");',
+  '    process.exit(1);',
+  '  });',
+  '});',
+].join('\n');
+
 export class BwrapDriver implements SandboxDriver {
   readonly tier: IsolationTier = 'tier1-kernel-mac';
 
   private policy: SandboxPolicy | undefined;
   private workspace: WorkspaceDescriptor | undefined;
+  private proxyPort = 0;
+  private bridgeScriptPath: string | undefined;
   private readonly activeProcesses = new Set<ChildProcess>();
 
   async prepare(
     policy: SandboxPolicy,
     workspace: WorkspaceDescriptor,
-    _proxyPort: number,
+    proxyPort: number,
   ): Promise<void> {
     this.policy = policy;
     this.workspace = workspace;
+    this.proxyPort = proxyPort;
+    const scriptPath = path.join(workspace.sessionTmpDir, 'aegis-uds-bootstrap.cjs');
+    fs.writeFileSync(scriptPath, `${UDS_BRIDGE_BOOTSTRAP_SOURCE}\n`, { mode: 0o600 });
+    this.bridgeScriptPath = canonicalizePath(scriptPath);
   }
 
   private prepareLaunchArgs(options: {
@@ -33,7 +75,7 @@ export class BwrapDriver implements SandboxDriver {
     readonly cwd?: string | undefined;
     readonly udsSocketPath?: string | undefined;
   }): { cwd: string; args: readonly string[] } {
-    if (!this.policy || !this.workspace) {
+    if (!this.policy || !this.workspace || !this.bridgeScriptPath) {
       throw new Error('BwrapDriver invoked before prepare().');
     }
     if (process.platform !== 'linux') {
@@ -50,9 +92,14 @@ export class BwrapDriver implements SandboxDriver {
       );
     }
 
+    const wrappedCommand =
+      this.proxyPort > 0
+        ? `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(this.bridgeScriptPath)} ${this.proxyPort} /run/aegis/egress.sock ${JSON.stringify(options.command)}`
+        : options.command;
+
     return {
       cwd,
-      args: compileBwrapArgs(this.policy, this.workspace, options.udsSocketPath, options.command),
+      args: compileBwrapArgs(this.policy, this.workspace, options.udsSocketPath, wrappedCommand),
     };
   }
 
@@ -144,5 +191,9 @@ export class BwrapDriver implements SandboxDriver {
 
   async cleanup(): Promise<void> {
     this.killActiveProcesses();
+    if (this.bridgeScriptPath && fs.existsSync(this.bridgeScriptPath)) {
+      fs.rmSync(this.bridgeScriptPath, { force: true });
+    }
+    this.bridgeScriptPath = undefined;
   }
 }

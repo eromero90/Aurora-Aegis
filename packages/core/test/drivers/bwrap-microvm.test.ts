@@ -58,7 +58,7 @@ describe('BwrapCompiler, UdsLoopbackBridge & MicroVMDriver', () => {
       expect(args).toContain('--tmpfs');
       expect(joined).toContain(`--ro-bind ${workspace.repoGitDir}/hooks ${workspace.repoGitDir}/hooks`);
       expect(joined).toContain(`--ro-bind-try ${workspace.repoGitDir}/config ${workspace.repoGitDir}/config`);
-      expect(joined).toContain(`--ro-bind ${udsPath} /run/aegis/egress.sock`);
+      expect(joined).toContain(`--bind ${udsPath} /run/aegis/egress.sock`);
     } finally {
       await manager.destroy(workspace);
     }

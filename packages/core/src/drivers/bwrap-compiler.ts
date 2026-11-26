@@ -1,4 +1,5 @@
 import os from 'node:os';
+import path from 'node:path';
 import type { SandboxPolicy, WorkspaceDescriptor } from '../types/contracts.js';
 import { canonicalizePath } from '../utils/paths.js';
 
@@ -45,9 +46,12 @@ export function compileBwrapArgs(
     realHome,
   ];
 
+  const toolchainDirs = new Set<string>([canonicalizePath(path.dirname(process.execPath))]);
   for (const tcPath of policy.readOnlyToolchainPaths) {
     if (tcPath.length === 0) continue;
-    const canonicalTc = canonicalizePath(tcPath);
+    toolchainDirs.add(canonicalizePath(tcPath));
+  }
+  for (const canonicalTc of toolchainDirs) {
     args.push('--ro-bind-try', canonicalTc, canonicalTc);
   }
 
@@ -87,7 +91,7 @@ export function compileBwrapArgs(
     `${realRepoGit}/refs/heads`,
     '--dir',
     '/run/aegis',
-    '--ro-bind',
+    '--bind',
     realUdsSocket,
     '/run/aegis/egress.sock',
     '--chdir',

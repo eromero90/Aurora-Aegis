@@ -89,6 +89,18 @@ describe('SeatbeltCompiler & SeatbeltDriver', () => {
         TMPDIR: workspace.sessionTmpDir,
       };
 
+      if (process.platform !== 'darwin') {
+        await expect(
+          driver.exec({
+            command: 'echo "allowed"',
+            env,
+            proxyPort: 8899,
+            caCertPath: path.join(workspace.sessionTmpDir, 'ca.pem'),
+          }),
+        ).rejects.toThrow(/SeatbeltDriver requires macOS/);
+        return;
+      }
+
       const writeRes = await driver.exec({
         command: 'echo "allowed" > allowed.txt && cat allowed.txt',
         env,
@@ -98,24 +110,22 @@ describe('SeatbeltCompiler & SeatbeltDriver', () => {
       expect(writeRes.exitCode).toBe(0);
       expect(writeRes.stdout.trim()).toBe('allowed');
 
-      if (process.platform === 'darwin') {
-        const hookRes = await driver.exec({
-          command: `echo "pwn" > "${workspace.repoGitDir}/hooks/post-checkout"`,
-          env,
-          proxyPort: 8899,
-          caCertPath: path.join(workspace.sessionTmpDir, 'ca.pem'),
-        });
-        expect(hookRes.exitCode).not.toBe(0);
-        expect(fs.existsSync(path.join(workspace.repoGitDir, 'hooks', 'post-checkout'))).toBe(false);
+      const hookRes = await driver.exec({
+        command: `echo "pwn" > "${workspace.repoGitDir}/hooks/post-checkout"`,
+        env,
+        proxyPort: 8899,
+        caCertPath: path.join(workspace.sessionTmpDir, 'ca.pem'),
+      });
+      expect(hookRes.exitCode).not.toBe(0);
+      expect(fs.existsSync(path.join(workspace.repoGitDir, 'hooks', 'post-checkout'))).toBe(false);
 
-        const homeReadRes = await driver.exec({
-          command: `ls "${fs.realpathSync.native(os.homedir())}"`,
-          env,
-          proxyPort: 8899,
-          caCertPath: path.join(workspace.sessionTmpDir, 'ca.pem'),
-        });
-        expect(homeReadRes.exitCode).not.toBe(0);
-      }
+      const homeReadRes = await driver.exec({
+        command: `ls "${fs.realpathSync.native(os.homedir())}"`,
+        env,
+        proxyPort: 8899,
+        caCertPath: path.join(workspace.sessionTmpDir, 'ca.pem'),
+      });
+      expect(homeReadRes.exitCode).not.toBe(0);
     } finally {
       await driver.cleanup();
       await manager.destroy(workspace);
